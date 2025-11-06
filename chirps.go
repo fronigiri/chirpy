@@ -96,6 +96,44 @@ func (cfg *apiConfig) handlerChirpID(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, toChirpResponse(chirp))
 }
 
+func (cfg *apiConfig) handlerChirpsDelete(w http.ResponseWriter, r *http.Request) {
+	s := r.PathValue("chirpID")
+	uuid, err := uuid.Parse(s)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "chirp ID not valid UUID", err)
+		return
+	}
+
+	chirp, err := cfg.db.GetChirpID(r.Context(), uuid)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "unable to find chirp with provided ID", err)
+		return
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "unable to retrieve token", err)
+		return
+	}
+
+	userID, err := auth.ValidateJWT(token, cfg.JWTSecret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Couldn't validate JWT", err)
+		return
+	}
+
+	if chirp.UserID != userID {
+		respondWithError(w, http.StatusForbidden, "provided user is not the author of this chirp", nil)
+		return
+	}
+	err2 := cfg.db.DeleteChirp(r.Context(), chirp.ID)
+	if err2 != nil {
+		respondWithError(w, http.StatusUnauthorized, "unable to delete chirp", err2)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 type chirpResponse struct {
 	ID        string    `json:"id"`
 	CreatedAt time.Time `json:"created_at"`

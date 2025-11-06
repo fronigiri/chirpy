@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/fronigiri/chirpy/internal/auth"
+	"github.com/fronigiri/chirpy/internal/database"
 )
 
 const (
@@ -23,7 +24,6 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
 	err := decoder.Decode(&params)
-
 	exp := defaultExpSec
 	if params.ExpiresInSeconds != nil {
 		v := *params.ExpiresInSeconds
@@ -35,6 +35,7 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 			exp = v
 		}
 	}
+
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
 		return
@@ -49,18 +50,34 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil || !match {
 		respondWithError(w, http.StatusUnauthorized, "incorrect email or password", err)
 	}
+
 	token, err := auth.MakeJWT(user.ID, cfg.JWTSecret, time.Duration(exp)*time.Second)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, "unable to create token", err)
 		return
 	}
+	tokenRefresh, err := auth.MakeRefreshToken()
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "unable to create refresh token", err)
+	}
+	args := database.AddRefreshTokenParams{
+		Token:     tokenRefresh,
+		UserID:    user.ID,
+		ExpiresAt: time.Now().UTC().Add(6024 * time.Hour),
+	}
+	_, err2 := cfg.db.AddRefreshToken(r.Context(), args)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "unable to add refresh token to database", err2)
+	}
 
 	u := User{
-		ID:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
-		Token:     token,
+		ID:           user.ID,
+		CreatedAt:    user.CreatedAt,
+		UpdatedAt:    user.UpdatedAt,
+		Email:        user.Email,
+		Token:        token,
+		RefreshToken: tokenRefresh,
+		IsChirpyRed:  user.IsChirpyRed,
 	}
 	respondWithJSON(w, http.StatusOK, u)
 
