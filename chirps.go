@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -65,19 +66,49 @@ func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) handlerAllChirps(w http.ResponseWriter, r *http.Request) {
 
-	chirps, err := cfg.db.AllChirps(r.Context())
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "couldn't fetch all chirps from database", err)
-		return
+	s := r.URL.Query().Get("author_id")
+	sorting := r.URL.Query().Get("sort")
+	if s != "" {
+		uuid, err := uuid.Parse(s)
+		if err != nil {
+			respondWithError(w, http.StatusNotFound, "chirp ID not valid UUID", err)
+			return
+		}
+		chirps, err2 := cfg.db.GetAuthorChirps(r.Context(), uuid)
+		if err2 != nil {
+			respondWithError(w, http.StatusInternalServerError, "couldn't fetch all chirps for user given", err2)
+			return
+		}
+		if chirps == nil {
+			chirps = []database.Chirp{}
+		}
+		if sorting == "desc" {
+			sort.Slice(chirps, func(i, j int) bool { return chirps[i].CreatedAt.After(chirps[j].CreatedAt) })
+		}
+		res := make([]chirpResponse, len(chirps))
+		for i, c := range chirps {
+			res[i] = toChirpResponse(c)
+		}
+
+		respondWithJSON(w, http.StatusOK, res)
+	} else {
+		chirps, err := cfg.db.AllChirps(r.Context())
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "couldn't fetch all chirps from database", err)
+			return
+		}
+		if chirps == nil {
+			chirps = []database.Chirp{}
+		}
+		if sorting == "desc" {
+			sort.Slice(chirps, func(i, j int) bool { return chirps[i].CreatedAt.After(chirps[j].CreatedAt) })
+		}
+		res := make([]chirpResponse, len(chirps))
+		for i, c := range chirps {
+			res[i] = toChirpResponse(c)
+		}
+		respondWithJSON(w, http.StatusOK, res)
 	}
-	if chirps == nil {
-		chirps = []database.Chirp{}
-	}
-	res := make([]chirpResponse, len(chirps))
-	for i, c := range chirps {
-		res[i] = toChirpResponse(c)
-	}
-	respondWithJSON(w, http.StatusOK, res)
 }
 
 func (cfg *apiConfig) handlerChirpID(w http.ResponseWriter, r *http.Request) {
